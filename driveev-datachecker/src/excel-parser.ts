@@ -1,4 +1,4 @@
-import * as XLSX from "xlsx";
+import XLSX from "xlsx";
 
 export interface ExcelEntry {
   rowNumber: number;

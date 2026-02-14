@@ -1,24 +1,14 @@
 {
   "name": "DubiCars",
   "baseUrl": "https://www.dubicars.com",
-  "preferredStrategy": "api",
-  "apiConfig": {
-    "endpoint": "https://api-suggestions.dubicars.com",
-    "searchPath": "/suggestions?q={brand}+{model}",
-    "responseMapping": {
-      "title": "results[0].title",
-      "price": "results[0].price",
-      "specs": "results[0].specifications",
-      "variants": "results[0].variants"
-    }
-  },
+  "preferredStrategy": "playwright",
   "selectors": {
-    "title": "h1.listing-title",
-    "price": ".price-section .price-value",
-    "specsTable": ".specifications-list .spec-row",
-    "specLabel": ".spec-label",
-    "specValue": ".spec-value",
-    "variants": ".variant-selector .variant-option",
-    "images": ".gallery-slider img"
+    "title": "h1.section-title",
+    "price": "p.fs-20.fw-600",
+    "specsTable": "section#model-specifications table tbody tr",
+    "specLabel": "td:first-child",
+    "specValue": "td:last-child",
+    "variants": "table.striped-table tbody tr td:first-child",
+    "images": "img.car-image"
   }
 }

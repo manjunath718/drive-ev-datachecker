@@ -15,6 +15,8 @@ const __dirname = path.dirname(__filename);
 export interface SiteConfig {
   name: string;
   baseUrl: string;
+  disabled?: boolean;
+  disabledReason?: string;
   preferredStrategy?: "api" | "cheerio" | "playwright";
   apiConfig?: ApiConfig;
   selectors: {
@@ -292,6 +294,20 @@ export async function scrapeEvData(
   const allConfigs = loadAllConfigs();
   const resolvedKey = siteKey || detectSiteKey(url, allConfigs) || "unknown";
   const config = resolvedKey !== "unknown" ? loadSiteConfig(resolvedKey) : null;
+
+  // Skip disabled sites
+  if (config?.disabled) {
+    console.error(
+      `[scraper] Skipping disabled site: ${resolvedKey} (${config.disabledReason || "no reason given"})`
+    );
+    return {
+      source: resolvedKey,
+      url,
+      data: { title: "", price: "", specs: {}, variants: [] },
+      rawText: "",
+      strategy: "skipped-disabled",
+    };
+  }
 
   const strategies = getStrategyOrder(config);
 
