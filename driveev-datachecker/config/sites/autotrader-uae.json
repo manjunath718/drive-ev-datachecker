@@ -1,6 +1,7 @@
 {
   "name": "AutoTrader UAE",
   "baseUrl": "https://www.autotraderuae.com",
+  "preferredStrategy": "cheerio",
   "selectors": {
     "title": "h1.vehicle-title",
     "price": ".vehicle-price .amount",

@@ -1,0 +1,14 @@
+{
+  "name": "ZigWheels UAE",
+  "baseUrl": "https://www.zigwheels.ae",
+  "preferredStrategy": "playwright",
+  "selectors": {
+    "title": "h1.car-name",
+    "price": ".car-price-value",
+    "specsTable": ".key-specs-content .spec-item",
+    "specLabel": ".spec-item-label",
+    "specValue": ".spec-item-value",
+    "variants": ".variant-list .variant-name",
+    "images": ".car-gallery img"
+  }
+}

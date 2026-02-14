@@ -1,13 +1,14 @@
 {
   "name": "YallaMotor",
   "baseUrl": "https://www.yallamotor.com",
+  "preferredStrategy": "playwright",
   "selectors": {
-    "title": "h1.listing-title",
-    "price": ".price-value",
-    "specsTable": ".specs-table tr",
-    "specLabel": "td.spec-label",
-    "specValue": "td.spec-value",
-    "variants": ".variant-list li",
-    "images": ".gallery img"
+    "title": "h1",
+    "price": "p.text-xl.font-bold.text-gray-500",
+    "specsTable": "div.space-y-3.p-3.text-center",
+    "specLabel": "div.mb-1.text-sm.text-gray-600",
+    "specValue": "div.text-base.font-semibold.text-gray-900",
+    "variants": "a[href*='/prices']",
+    "images": "img[src*='yallamotor']"
   }
 }

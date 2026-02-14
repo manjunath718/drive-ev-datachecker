@@ -1,6 +1,7 @@
 {
   "name": "Tesla Official",
   "baseUrl": "https://www.tesla.com",
+  "preferredStrategy": "playwright",
   "selectors": {
     "title": "h1[class*='vehicle-name']",
     "price": "span[class*='finance-item--price']",

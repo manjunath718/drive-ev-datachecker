@@ -1,0 +1,24 @@
+{
+  "name": "DriveArabia",
+  "baseUrl": "https://www.drivearabia.com",
+  "preferredStrategy": "api",
+  "apiConfig": {
+    "endpoint": "https://www.drivearabia.com",
+    "searchPath": "/wp-json/wp/v2/posts?search={brand}+{model}&per_page=5",
+    "responseMapping": {
+      "title": "[0].title.rendered",
+      "price": "[0].acf.price",
+      "specs": "[0].acf.specifications",
+      "variants": "[0].acf.variants"
+    }
+  },
+  "selectors": {
+    "title": "h1.entry-title",
+    "price": ".car-price .amount",
+    "specsTable": ".car-specs-table tr",
+    "specLabel": "td.spec-name",
+    "specValue": "td.spec-data",
+    "variants": ".trim-list .trim-item",
+    "images": ".car-gallery img"
+  }
+}

@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { parseExcelFile } from "./excel-parser.js";
-import { scrapeEvData } from "./scraper.js";
+import { scrapeEvData, closeBrowser } from "./scraper.js";
 import { compareEntry } from "./comparator.js";
 import { saveExcelReport, saveMarkdownReport } from "./report-writer.js";
 
@@ -50,7 +50,7 @@ server.tool(
 // Tool 2: Scrape EV Data
 server.tool(
   "scrape_ev_data",
-  "Scrapes a URL for EV car data using config-driven CSS selectors with raw text fallback. Includes retry logic and timeout handling.",
+  "Scrapes a URL for EV car data using a 3-strategy waterfall: API (fastest) → Cheerio (fast) → Playwright (most reliable). Includes retry logic, timeout handling, and raw text fallback.",
   {
     url: z.string().describe("Full URL to scrape"),
     siteKey: z
@@ -59,10 +59,18 @@ server.tool(
       .describe(
         "Site config key (e.g., 'yallamotor'). Auto-detected from URL if omitted"
       ),
+    brand: z
+      .string()
+      .optional()
+      .describe("Car brand (e.g., 'Tesla'). Needed for API strategy."),
+    model: z
+      .string()
+      .optional()
+      .describe("Car model (e.g., 'Model 3'). Needed for API strategy."),
   },
-  async ({ url, siteKey }) => {
+  async ({ url, siteKey, brand, model }) => {
     try {
-      const data = await scrapeEvData(url, siteKey);
+      const data = await scrapeEvData(url, siteKey, brand, model);
       return {
         content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
       };
@@ -197,6 +205,7 @@ async function main() {
 
   const shutdown = async () => {
     console.error("Shutting down DriveEV Data Checker MCP server...");
+    await closeBrowser();
     await server.close();
     process.exit(0);
   };

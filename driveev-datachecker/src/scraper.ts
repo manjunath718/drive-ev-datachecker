@@ -2,13 +2,21 @@ import * as cheerio from "cheerio";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
+import { fetchFromApi, type ApiConfig } from "./api-fetcher.js";
+import { scrapeWithBrowser, closeBrowser } from "./browser-scraper.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// ---------------------------------------------------------------------------
+// Interfaces
+// ---------------------------------------------------------------------------
+
 export interface SiteConfig {
   name: string;
   baseUrl: string;
+  preferredStrategy?: "api" | "cheerio" | "playwright";
+  apiConfig?: ApiConfig;
   selectors: {
     title?: string;
     price?: string;
@@ -30,9 +38,14 @@ export interface ScrapedData {
     variants: string[];
   };
   rawText: string;
+  strategy?: string; // which strategy succeeded
 }
 
-function loadSiteConfig(siteKey: string): SiteConfig | null {
+// ---------------------------------------------------------------------------
+// Config loading
+// ---------------------------------------------------------------------------
+
+export function loadSiteConfig(siteKey: string): SiteConfig | null {
   const configPath = path.join(
     __dirname,
     "..",
@@ -49,10 +62,7 @@ function loadSiteConfig(siteKey: string): SiteConfig | null {
   }
 }
 
-/**
- * Load all site configs from the config/sites/ directory.
- */
-function loadAllConfigs(): Record<string, SiteConfig> {
+export function loadAllConfigs(): Record<string, SiteConfig> {
   const configDir = path.join(__dirname, "..", "config", "sites");
   const configs: Record<string, SiteConfig> = {};
 
@@ -87,12 +97,15 @@ function detectSiteKey(
         return key;
       }
     } catch {
-      // If URL parsing fails, fall back to string includes
       if (url.includes(key)) return key;
     }
   }
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// Strategy 2: Cheerio (static HTML)
+// ---------------------------------------------------------------------------
 
 const DEFAULT_TIMEOUT_MS = 15000;
 const MAX_RETRIES = 2;
@@ -135,7 +148,7 @@ async function fetchWithRetry(
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
       console.error(
-        `Fetch attempt ${attempt + 1}/${retries + 1} failed for ${url}: ${lastError.message}`
+        `[cheerio] Fetch attempt ${attempt + 1}/${retries + 1} failed for ${url}: ${lastError.message}`
       );
 
       if (attempt < retries) {
@@ -146,68 +159,198 @@ async function fetchWithRetry(
     }
   }
 
-  throw new Error(
-    `Failed to fetch ${url} after ${retries + 1} attempts: ${lastError?.message}`
-  );
+  return ""; // Return empty string instead of throwing — let waterfall continue
 }
 
+async function scrapeWithCheerio(
+  url: string,
+  siteKey: string,
+  config: SiteConfig | null
+): Promise<ScrapedData | null> {
+  try {
+    const html = await fetchWithRetry(url);
+
+    if (!html) {
+      console.error(`[cheerio] Empty response for ${url}`);
+      return null;
+    }
+
+    const $ = cheerio.load(html);
+
+    const result: ScrapedData = {
+      source: siteKey,
+      url,
+      data: { title: "", price: "", specs: {}, variants: [] },
+      rawText: "",
+      strategy: "cheerio",
+    };
+
+    if (config) {
+      if (config.selectors.title) {
+        result.data.title = $(config.selectors.title).first().text().trim();
+      }
+      if (config.selectors.price) {
+        result.data.price = $(config.selectors.price).first().text().trim();
+      }
+      if (config.selectors.specsTable) {
+        $(config.selectors.specsTable).each((_, row) => {
+          const labelSel = config.selectors.specLabel || "td:first-child";
+          const valueSel = config.selectors.specValue || "td:last-child";
+          let label = $(row).find(labelSel).first().text().trim();
+          let value = $(row).find(valueSel).first().text().trim();
+          // Pattern 2 (Tailwind sites): row IS the label, value is next sibling
+          if (!label && $(row).is(labelSel)) {
+            label = $(row).text().trim();
+            const sibling = $(row).next(valueSel);
+            if (sibling.length) {
+              value = sibling.text().trim();
+            }
+          }
+          if (label && value && label !== value) {
+            result.data.specs[label.toLowerCase().replace(/\s+/g, "_")] = value;
+          }
+        });
+      }
+      if (config.selectors.variants) {
+        $(config.selectors.variants).each((_, el) => {
+          const variant = $(el).text().trim();
+          if (variant) result.data.variants.push(variant);
+        });
+      }
+    }
+
+    // Raw text fallback
+    $("script, style, nav, footer, header, noscript, iframe").remove();
+    result.rawText = $("body")
+      .text()
+      .replace(/\s+/g, " ")
+      .trim()
+      .substring(0, 8000);
+
+    // If we got no structured data and barely any raw text, consider it a failure
+    const hasData =
+      result.data.title ||
+      result.data.price ||
+      Object.keys(result.data.specs).length > 0 ||
+      result.rawText.length > 100;
+
+    if (!hasData) {
+      console.error(`[cheerio] No meaningful data extracted from ${url}`);
+      return null;
+    }
+
+    return result;
+  } catch (err) {
+    console.error(
+      `[cheerio] Error scraping ${url}:`,
+      err instanceof Error ? err.message : err
+    );
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Waterfall orchestrator
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the ordered list of strategies to try based on site config.
+ * The preferred strategy goes first, then the others in default order.
+ */
+function getStrategyOrder(
+  config: SiteConfig | null
+): Array<"api" | "cheerio" | "playwright"> {
+  const defaultOrder: Array<"api" | "cheerio" | "playwright"> = [
+    "api",
+    "cheerio",
+    "playwright",
+  ];
+
+  const preferred = config?.preferredStrategy;
+  if (!preferred) return defaultOrder;
+
+  // Put preferred first, then the rest in default order
+  return [preferred, ...defaultOrder.filter((s) => s !== preferred)];
+}
+
+/**
+ * Main entry point: scrape EV data using a 3-strategy waterfall.
+ *
+ *   1. API (fastest)  → if fails →
+ *   2. Cheerio (fast) → if fails →
+ *   3. Playwright (heavy, most reliable)
+ *
+ * The preferred strategy from the site config determines the order.
+ * Returns the first successful result. Raw text fallback is always included.
+ */
 export async function scrapeEvData(
   url: string,
-  siteKey?: string
+  siteKey?: string,
+  brand?: string,
+  model?: string
 ): Promise<ScrapedData> {
-  const html = await fetchWithRetry(url);
-  const $ = cheerio.load(html);
-
-  // Determine site config
   const allConfigs = loadAllConfigs();
-  const resolvedKey = siteKey || detectSiteKey(url, allConfigs);
-  const config = resolvedKey ? loadSiteConfig(resolvedKey) : null;
+  const resolvedKey = siteKey || detectSiteKey(url, allConfigs) || "unknown";
+  const config = resolvedKey !== "unknown" ? loadSiteConfig(resolvedKey) : null;
 
-  const result: ScrapedData = {
-    source: resolvedKey || "unknown",
+  const strategies = getStrategyOrder(config);
+
+  console.error(
+    `[scraper] Scraping ${url} (site: ${resolvedKey}, strategy order: ${strategies.join(" → ")})`
+  );
+
+  for (const strategy of strategies) {
+    console.error(`[scraper] Trying strategy: ${strategy}`);
+
+    let result: ScrapedData | null = null;
+
+    switch (strategy) {
+      case "api":
+        if (config?.apiConfig && brand && model) {
+          result = await fetchFromApi(
+            resolvedKey,
+            config.apiConfig,
+            brand,
+            model
+          );
+          if (result) result.strategy = "api";
+        } else {
+          console.error(
+            `[scraper] Skipping API strategy: ${!config?.apiConfig ? "no apiConfig" : "no brand/model provided"}`
+          );
+        }
+        break;
+
+      case "cheerio":
+        result = await scrapeWithCheerio(url, resolvedKey, config);
+        break;
+
+      case "playwright":
+        result = await scrapeWithBrowser(url, resolvedKey, config);
+        if (result) result.strategy = "playwright";
+        break;
+    }
+
+    if (result) {
+      console.error(
+        `[scraper] Success with strategy: ${strategy} for ${url}`
+      );
+      return result;
+    }
+
+    console.error(`[scraper] Strategy ${strategy} failed, trying next...`);
+  }
+
+  // All strategies failed — return minimal result with whatever we have
+  console.error(`[scraper] All strategies failed for ${url}`);
+  return {
+    source: resolvedKey,
     url,
     data: { title: "", price: "", specs: {}, variants: [] },
     rawText: "",
+    strategy: "none",
   };
-
-  if (config) {
-    // Structured extraction using CSS selectors
-    if (config.selectors.title) {
-      result.data.title = $(config.selectors.title).first().text().trim();
-    }
-    if (config.selectors.price) {
-      result.data.price = $(config.selectors.price).first().text().trim();
-    }
-    if (config.selectors.specsTable) {
-      $(config.selectors.specsTable).each((_, row) => {
-        const label = $(row)
-          .find(config.selectors.specLabel || "td:first-child")
-          .text()
-          .trim();
-        const value = $(row)
-          .find(config.selectors.specValue || "td:last-child")
-          .text()
-          .trim();
-        if (label && value) {
-          result.data.specs[label.toLowerCase().replace(/\s+/g, "_")] = value;
-        }
-      });
-    }
-    if (config.selectors.variants) {
-      $(config.selectors.variants).each((_, el) => {
-        const variant = $(el).text().trim();
-        if (variant) result.data.variants.push(variant);
-      });
-    }
-  }
-
-  // Always extract raw text as fallback
-  $("script, style, nav, footer, header, noscript, iframe").remove();
-  result.rawText = $("body")
-    .text()
-    .replace(/\s+/g, " ")
-    .trim()
-    .substring(0, 8000);
-
-  return result;
 }
+
+// Re-export closeBrowser for shutdown
+export { closeBrowser } from "./browser-scraper.js";
