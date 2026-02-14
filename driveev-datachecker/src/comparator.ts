@@ -150,6 +150,75 @@ function findMatchingKey(target: string, keys: string[]): string | null {
 }
 
 /**
+ * Extract all numeric values from a string (handles "AED 149,900 - 179,900",
+ * "520 km - 570 km", "5.7 sec", etc.)
+ */
+function extractNumbers(val: string): number[] {
+  const matches = val.match(/[\d]+(?:[.,]\d+)*/g);
+  if (!matches) return [];
+  return matches
+    .map((m) => parseFloat(m.replace(/,/g, "")))
+    .filter((n) => !isNaN(n) && n > 0);
+}
+
+/**
+ * Compare a price field using range logic.
+ * Collects all numeric prices from all scraped sources, finds the global
+ * min and max, and checks if the Excel price falls within that range.
+ */
+function comparePriceField(
+  excelValue: string,
+  scrapedValues: Record<string, string>
+): FieldComparison {
+  const result: FieldComparison = {
+    excel: excelValue,
+    scraped: scrapedValues,
+    status: "missing",
+  };
+
+  const sources = Object.keys(scrapedValues);
+  if (sources.length === 0) {
+    result.note = "No scraped data available for this field";
+    return result;
+  }
+
+  const excelNumbers = extractNumbers(excelValue);
+  if (excelNumbers.length === 0) {
+    result.status = "mismatch";
+    result.note = "Could not parse Excel price as a number";
+    return result;
+  }
+
+  const excelPrice = excelNumbers[0];
+
+  // Collect all numeric values from all scraped sources
+  const allScrapedPrices: number[] = [];
+  for (const source of sources) {
+    const nums = extractNumbers(scrapedValues[source]);
+    allScrapedPrices.push(...nums);
+  }
+
+  if (allScrapedPrices.length === 0) {
+    result.status = "mismatch";
+    result.note = "Could not parse any scraped price as a number";
+    return result;
+  }
+
+  const minPrice = Math.min(...allScrapedPrices);
+  const maxPrice = Math.max(...allScrapedPrices);
+
+  if (excelPrice >= minPrice && excelPrice <= maxPrice) {
+    result.status = "match";
+    result.note = `Excel price ${excelPrice.toLocaleString()} is within scraped range ${minPrice.toLocaleString()} - ${maxPrice.toLocaleString()}`;
+  } else {
+    result.status = "mismatch";
+    result.note = `Excel price ${excelPrice.toLocaleString()} is outside scraped range ${minPrice.toLocaleString()} - ${maxPrice.toLocaleString()}`;
+  }
+
+  return result;
+}
+
+/**
  * Compare a single field's Excel value against scraped values from multiple
  * sources.  Returns a FieldComparison indicating match / mismatch / missing.
  */
@@ -223,7 +292,7 @@ export function compareEntry(
   }
 
   const fields: Record<string, FieldComparison> = {};
-  fields["price"] = compareField(excelEntry.price, priceScraped);
+  fields["price"] = comparePriceField(excelEntry.price, priceScraped);
 
   // --- Specs comparison ---
   for (const [specKey, excelValue] of Object.entries(excelEntry.specs)) {
