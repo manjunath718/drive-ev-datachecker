@@ -1,0 +1,13 @@
+{
+  "name": "Tesla Official",
+  "baseUrl": "https://www.tesla.com",
+  "selectors": {
+    "title": "h1[class*='vehicle-name']",
+    "price": "span[class*='finance-item--price']",
+    "specsTable": "ul[class*='specs-list'] li",
+    "specLabel": "span[class*='specs-list-label']",
+    "specValue": "span[class*='specs-list-value']",
+    "variants": "section[class*='group--options'] button",
+    "images": "div[class*='gallery'] img"
+  }
+}

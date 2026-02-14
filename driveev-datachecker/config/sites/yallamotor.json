@@ -1,0 +1,13 @@
+{
+  "name": "YallaMotor",
+  "baseUrl": "https://www.yallamotor.com",
+  "selectors": {
+    "title": "h1.listing-title",
+    "price": ".price-value",
+    "specsTable": ".specs-table tr",
+    "specLabel": "td.spec-label",
+    "specValue": "td.spec-value",
+    "variants": ".variant-list li",
+    "images": ".gallery img"
+  }
+}

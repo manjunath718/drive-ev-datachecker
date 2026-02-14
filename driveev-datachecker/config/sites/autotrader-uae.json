@@ -1,0 +1,13 @@
+{
+  "name": "AutoTrader UAE",
+  "baseUrl": "https://www.autotraderuae.com",
+  "selectors": {
+    "title": "h1.vehicle-title",
+    "price": ".vehicle-price .amount",
+    "specsTable": ".specifications-table tr",
+    "specLabel": "th.spec-name",
+    "specValue": "td.spec-detail",
+    "variants": ".trim-levels .trim-item",
+    "images": ".vehicle-gallery img"
+  }
+}
